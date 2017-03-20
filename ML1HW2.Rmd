@@ -11,7 +11,7 @@ output:
 ```{r}
 suppressPackageStartupMessages(library(tidyverse))
 library(stringr)
-library(bestglm)
+library(bestglm) 
 
 bonddata <-  read.table("http://www.stat.cmu.edu/~cschafer/MSCF/bonddata.txt",sep=",", header=T)
 bonddata <- tbl_df(bonddata)
