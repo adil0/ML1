@@ -1,0 +1,181 @@
+---
+title: "ML1HW5"
+author: "Adil Hayat"
+date: "18 February 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# HW5 Part1
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+library(stringr)
+suppressPackageStartupMessages(library(mgcv))
+bonddata <-  read.table("http://www.stat.cmu.edu/~cschafer/MSCF/bonddata.txt",sep=",", header=T)
+bonddata <- tbl_df(bonddata)
+# Assumed that the columns with less than 10 distinct values as categorical 
+# Extract the predictors from time steps 2 and prior 
+prior_colnames<- sapply(names(bonddata), function(x) { str_match_all(x, "[0-9]+") %>% 
+    unlist %>% unique %>% as.numeric >=2 })
+prior_colnames <- names(prior_colnames[prior_colnames==TRUE]) %>% na.omit %>% unique
+
+# columns to remove, removing the columsn bond_id and id as well 
+col_remove <- c(prior_colnames,"id","bond_id")
+
+bonddata_sel <- select(bonddata,-one_of(col_remove))
+# remove the observation 1457 from the data set
+bonddata_sel <- bonddata_sel[-1457,]
+```
+
+### Question 1
+```{r}
+par(mfrow=c(2,2))
+hist(bonddata_sel$weight, freq=FALSE, main="Histogram of Weight")
+hist(bonddata_sel$time_to_maturity, freq=FALSE, main="Histogram of Time to Maturity")
+hist(bonddata_sel$trade_size, freq=FALSE, main="Histogram of Trade Size")
+hist(bonddata_sel$trade_size_last1, freq=FALSE, main="Histogram of Trade Size 1")
+# The histograms are skewed, so log transformation will help
+
+vars <- c("weight","time_to_maturity", "trade_size", "trade_size_last1")
+bonddata_sel[vars] <- log(bonddata_sel[vars])
+
+bonddata_sel$reporting_delay <- as.factor(cut(bonddata_sel$reporting_delay, c(-Inf,2,10,100,Inf)))
+bonddata_sel$received_time_diff_last1 <- as.factor(cut(bonddata_sel$received_time_diff_last1, c(-Inf,500,75000,4000000,Inf)))
+```
+
+### Question 2
+```{r}
+model = gam(trade_price ~ s(weight) + s(current_coupon) + s(time_to_maturity) + 
+            as.factor(is_callable) + s(trade_size) +  as.factor(trade_type) +  
+            s(curve_based_price) + s(trade_price_last1) + s(trade_size_last1) + 
+            reporting_delay + as.factor(trade_type_last1) + s(curve_based_price_last1) +   
+            received_time_diff_last1, data=bonddata_sel)
+summary(model)
+```
+### Question 3
+The mean difference in the trade price between the bonds with current trade 
+"type 3"" and "type 4" is 1.55-0.73 = 0.81
+
+### Question 4
+```{r}
+plot(model, pages=2,scale=0, scheme=1)
+```
+
+### Question 5
+```{r}
+plot(model$fitted.values,model$residuals, xlab="Fitted Values", ylab= "Residuals",
+     main="Residuals vs Fitted Values")
+```
+## The plot looks good except for one residual in the bottom and points near the fitted value of 80 where we finf huge variance in the values of the residuals.
+
+
+### Question 6
+```{r}
+plot(predict(model),bonddata_sel$trade_price,pch=16,cex=0.7,xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3)
+abline(0,1,lwd=2,col=2)
+```
+## The model seems to fit the data quite well, the actual values are very close to the fitted values.
+
+### Question 7
+```{r}
+holdlinear = gam(trade_price ~ weight + current_coupon + time_to_maturity + 
+                 is_callable + reporting_delay + trade_size + trade_type + 
+                 curve_based_price + received_time_diff_last1 + trade_price_last1 + 
+                 trade_size_last1 + trade_type_last1 + curve_based_price_last1,
+                 data = bonddata_sel)
+
+cat("AIC of the Generalised Additive model =", AIC(model), "\n")
+cat("AIC of the model with Linear Components", AIC(holdlinear), "\n")
+```
+## The AIC of the Generalized Additive Model is much lower than that of the model with just linear components. So, the extra complexity from our new model is justified.
+
+
+\newpage
+# Adil Hayat
+# HW5 Part 2
+```{r}
+# train the additive model
+trainset <- readRDS("traindata.rds")
+trainset <- tbl_df(trainset)
+fullrow = rep(FALSE,nrow(trainset))
+fullrow <- apply(trainset, 1, function(x){!any(is.na(x[29:147]))})
+filt_trainset <- trainset[fullrow,]
+RetsOnly = trainset[fullrow, 29:147]
+# combine the varibles from Rets_2 to Rets_120 and the Ret_PlusOne into 
+# a single data frame to build the model
+traindata <- cbind(filt_trainset$Ret_PlusOne, RetsOnly)
+names(traindata)[1] <- "Ret_PlusOne"
+
+# use the result of the step model from assignment 3
+load("stepModelWinton.Rds")
+string_model <- paste(names(finalmod$coefficients)[-1],collapse = "+")
+new_model <- as.formula(paste("Ret_PlusOne",string_model, sep="~"))
+
+# The cross-validation procedure
+source("http://www.stat.cmu.edu/~cschafer/MSCF/CVforppr.R")
+modelformula = new_model
+# pprCV = matrix(0,nrow=5,ncol=4)
+# 
+# for(j in 1:ncol(pprCV))
+# {
+#   set.seed(j)
+#   for(i in 1:nrow(pprCV))
+#   {
+#     pprCV[i,j] = CVforppr(modelformula, nterms=i, numfolds=5, data=traindata)
+#   }
+# }
+
+# save(pprCV, file = "pprResult.Robj")
+load("pprResult.Robj")
+# Plot of CV Results
+
+plot(1:nrow(pprCV),apply(pprCV,1,mean),type="b",pch=16,col=2,cex.axis=1.3,
+   cex.lab=1.3,xlab="Number of Ridge Functions (M)",
+   ylab="Squared Error (via Cross-Validation)")
+
+for(j in 1:ncol(pprCV))
+{
+   points(1:nrow(pprCV),pprCV[,j],pch=16)
+}
+
+```
+### Since increasing the number of terms leads to an increase in the Cross 
+###  Validated Squared Error. So, we use M=1 in the final model.  
+```{r}
+source("ConvertSubmission.txt")
+# final model
+final_mod <- ppr(modelformula, nterms = 1, data=traindata)
+summary(final_mod)
+plot(predict(final_mod),traindata$Ret_PlusOne,pch=16,cex=0.7,xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3, main="PPR Model")
+abline(0,1,lwd=2,col=2)
+
+
+# using gam on the same data
+final_mod2 <- gam(modelformula, data = traindata)
+summary(final_mod2)
+plot(predict(final_mod2),traindata$Ret_PlusOne,pch=16,cex=0.7,xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3, main= "GAM Model")
+abline(0,1,lwd=2,col=2)
+
+
+# test_data <- read.csv("testsetsub.csv")
+# saveRDS(test_data,file ="testData.rds")
+testset <- readRDS("testData.rds")
+
+## using the ppr model
+pred_values <- predict(final_mod,newdata = testset)
+# ConvertSubmission(pred_values)
+
+## using the GAM model
+pred_values2 <- predict(final_mod2,newdata = testset)
+# ConvertSubmission(pred_values2, outfname = "mysubmissionGAM.txt")
+```
+### Looking at the graph of the Actual vs Predicted values, we observe that 
+### PPR model is better.

@@ -1,0 +1,145 @@
+---
+title: "ML1HW2"
+author: "Adil Hayat"
+date: "26 January 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+## HW2 Part1
+### Question 1
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+library(stringr)
+library(bestglm)
+
+bonddata <-  read.table("http://www.stat.cmu.edu/~cschafer/MSCF/bonddata.txt",sep=",", header=T)
+bonddata <- tbl_df(bonddata)
+colnames(bonddata)
+
+# Assumed that the columns with less than 10 distinct values as categorical 
+# Extract the predictors from time steps 2 and prior 
+prior_colnames<- sapply(names(bonddata), function(x) { str_match_all(x, "[0-9]+") %>% 
+    unlist %>% unique %>% as.numeric >=2 })
+prior_colnames <- names(prior_colnames[prior_colnames==TRUE]) %>% na.omit %>% unique
+
+# columns to remove, removing the columsn bond_id and id as well 
+col_remove <- c(prior_colnames,"id","bond_id")
+
+bonddata_sel <- select(bonddata,-one_of(col_remove))
+
+Xyframe <- data.frame(cbind(bonddata_sel[,(2:ncol(bonddata_sel))],bonddata_sel[,1]))
+bestmod <- bestglm(Xyframe, IC="AIC")
+
+summary(bestmod$BestModel)
+```
+### The categorical predictors trade_type and trade_type1 show up in the final model.
+
+
+### Question 2
+```{r}
+
+fullmod <- lm(trade_price~.,data = bonddata_sel)
+levs <- hatvalues(fullmod)
+
+# Calculate PRESS
+PRESS <- sum((fullmod$residuals/(1-levs))^2)
+
+# comparing the PRESS of the model using the model estimated using AIC
+levsbestmod <- hatvalues(bestmod$BestModel)
+
+# Calculate PRESS
+PRESSbestmod <- sum((bestmod$BestModel$residuals/(1-levsbestmod))^2)
+
+# print the values
+cat("The PRESS of the full model=",PRESS,"and the AIC fitted best model=",
+    PRESSbestmod,"\n")
+```
+### Question 3
+```{r}
+# Using the Cook's distance
+cookd = as.numeric(cooks.distance(bestmod$BestModel))
+numcoeff <- length(bestmod$BestModel$coefficients)
+sort(pf(cookd, numcoeff, nrow(bonddata_sel) - numcoeff),decreasing=TRUE)[1:5]
+```
+### The observations above 50th percentile are a cause of concern.
+### The largest value of Cook's distance is 2% so there are no influentail observations.
+
+### Question 4
+```{r}
+library(MASS)
+
+holdrlm = rlm(as.formula((paste("trade_price",paste(names(bestmod$BestModel$coefficients[-1]),
+                                                    collapse="+"),sep="~"))),data = bonddata_sel)
+
+dat <- data.frame(holdrlm$fitted.values,holdrlm$residuals)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+    geom_point(shape=1)
+qqnorm(dat$Residuals);qqline(dat$Residuals, col=2)
+
+```
+### The residuals have heavy tails compared to a Normal Distibution
+
+### Question 5
+```{r}
+library(car)
+boxcox(lm(trade_price~.,data = bonddata_sel))
+```
+### This gives us the value of $\lambda$=1. So, no transformation of the data is required. 
+
+\newpage
+# Adil Hayat
+## HW2Part2
+### Questoin 1
+```{r }
+trainset <- readRDS("traindata.rds")
+trainset <- tbl_df(trainset)
+fullrow = rep(FALSE,nrow(trainset))
+# commenting this code for efficiency
+# for(i in 1:nrow(trainset))
+# {
+#   fullrow[i] = !any(is.na(trainset[i,29:147]))
+# }
+
+fullrow <- apply(trainset, 1, function(x){!any(is.na(x[29:147]))})
+```
+fullrow is a boolean vector that is TRUE only if all the values in a row are available specifically from columns from 29 to 147(are not NAs)   
+
+### Questoin 2
+```{r}
+varnames <- c(paste("Ret_", 2:120, sep=""))
+fullform = as.formula(paste("Ret_PlusOne ~ ",paste(varnames,collapse="+")))
+```
+fullform contains the formula for the regression with Ret_PlusOne as the response variable and the variables Ret_2 to Ret_120 as the predictors.
+
+### Questoin 3
+```{r}
+filt_trainset <- trainset[fullrow,]
+fullmod <- lm(fullform,data=filt_trainset)
+summary(fullmod)
+```
+
+### Question 4
+Using the step function to find the best model
+```{r}
+finalmod = step(fullmod, direction="both", trace = FALSE)
+```
+
+### Question 5
+plotting the residuals and QQPlot
+```{r}
+dat= data.frame(finalmod$fitted.values,finalmod$residuals)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+    geom_point(shape=1)
+qqnorm(dat$Residuals);qqline(dat$Residuals, col=2)
+```
+### Question 6
+Cook's Distance Calculation
+```{r}
+numpred = length(finalmod$coefficients)
+cookd = as.numeric(cooks.distance(finalmod))
+sort(pf(cookd,numpred,nrow(trainset)-numpred),decreasing=TRUE)[1:5]
+```
+# There are two data points with the pencentile of Cook's distance of 100% and 99.99%. So, these 2 data points are very influential.

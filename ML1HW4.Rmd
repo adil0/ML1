@@ -1,0 +1,132 @@
+---
+title: "ML1HW4"
+author: "Adil Hayat"
+date: "12 February 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r cars}
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(quantmod))
+suppressPackageStartupMessages(library(glmnet))
+## Code for fetching the data for MSFT and the ETFs 
+# # Read in all of the NYSE ETF symbols
+# # This was obtained from 
+# #    http://www.investorpoint.com/exchange/NYE-New+York+Stock+Exchange/etf/
+# 
+# nyse_etfs = read.table("http://www.stat.cmu.edu/~cschafer/MSCF/NYSEETFlist.txt", sep="\t")
+# 
+# 
+# # Build the matrix of returns
+# 
+# startdate = "2016-1-1"
+# enddate = "2016-12-31"
+# 
+# # Get the data for the stock under consideration
+# 
+# stockdata = getSymbols("MSFT", auto.assign=FALSE, from=startdate, to=enddate)
+# y = dailyReturn(stockdata[,6])
+# 
+# retmat = NULL
+# namelist = NULL
+# 
+# pos = 1
+# for(etf in as.character(nyse_etfs$V1))
+# {
+#   holdout = try(getSymbols(etf, auto.assign=FALSE, from=startdate, to=enddate), TRUE)
+#   if("try-error" %in% class(holdout))
+#   {
+#     next
+#   }
+#   
+#   if(ndays(holdout) != ndays(stockdata))
+#   {
+#     next
+#   }
+#   
+#   retmat = cbind(retmat, dailyReturn(holdout[,6]))
+#   namelist = c(namelist,etf) 
+#   pos = pos + 1
+#   print(pos)
+# }
+# 
+# retmat = data.frame(retmat)
+# names(retmat) = namelist
+# 
+# save(retmat,file="retmat.Robj")
+# save(stockdata, file="MSFTret.Robj")
+```
+
+### Question 1
+```{r}
+# read the saved data
+load("retmat.Robj")
+load("MSFTret.Robj")
+
+glmnetout <- glmnet(as.matrix(retmat),as.numeric(y))
+print(glmnetout)
+```
+### Question 2
+```{r}
+cvglmout = cv.glmnet(as.matrix(retmat),as.numeric(y), nfolds = 5)
+plot(cvglmout)
+```
+### Question 3
+```{r}
+optlambdapos <- which(cvglmout$glmnet.fit$lambda == cvglmout$lambda.1se)
+```
+We choose the value of $\lambda$ = 0.0035, which is one standard error away from the minimum MSE but with a fewer number of parameters.    
+
+### Question 4
+```{r}
+glmnetout$beta[glmnetout$beta[,optlambdapos] != 0, optlambdapos]
+```
+The ETFs included in the final model are IYW, TECS, XLK. 
+
+\newpage
+# HW 4 Part 2
+# Adil Hayat
+
+```{r}
+# load the data and filter out the rows with incomplete data
+trainset <- readRDS("traindata.rds")
+trainset <- tbl_df(trainset)
+fullrow = rep(FALSE,nrow(trainset))
+fullrow <- apply(trainset, 1, function(x){!any(is.na(x[29:147]))})
+filt_trainset <- trainset[fullrow,]
+RetsOnly = trainset[fullrow, 29:147]
+```
+
+### Fit a spline first.
+```{r}
+# time <- seq(from = 2, to = 120, by = 1 )
+# FittedData <- numeric()
+# 
+# for(i in 1:nrow(RetsOnly)){
+#   holdspline = smooth.spline(x=time,y=RetsOnly[i,], cv=TRUE)
+#   FittedData = rbind(FittedData, holdspline$y)
+# }
+# 
+# varnames <- c(paste("SRet_", 2:120, sep=""))
+# colnames(FittedData) <- varnames
+# save(FittedData, file= "SplineFitedData.Robj")
+load("SplineFitedData.Robj")
+```
+
+### Using lasso to fit the model
+```{r}
+glmnetout <- glmnet(FittedData,filt_trainset$Ret_PlusOne)
+print(glmnetout)
+cvglmout = cv.glmnet(FittedData,filt_trainset$Ret_PlusOne, nfolds = 10)
+plot(cvglmout)
+optlambdapos <- which(cvglmout$glmnet.fit$lambda == cvglmout$lambda.min)
+glmnetout$beta[glmnetout$beta[,optlambdapos] != 0, optlambdapos]
+```
+We select the model with minimum MSE as our model.

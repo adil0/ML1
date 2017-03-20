@@ -1,0 +1,114 @@
+---
+
+title: "F14"
+author: "Adil Hayat"
+date: "8 March 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(fANCOVA)
+library(tidyverse)
+library(car)
+library(mgcv)
+library(tree)
+source("http://www.stat.cmu.edu/~cschafer/MSCF/cv.tree.full.txt")
+housedat = read.table("http://www.stat.cmu.edu/~cschafer/MSCF/CalifHousing.txt", header=T, sep=",")
+plot(housedat$MedianHouseValue, housedat$MedianIncome, pch=".")
+```
+
+
+# Question 1
+```{r}
+loclin <- loess.as(housedat$MedianHouseValue, housedat$MedianIncome, criterion = "aicc")
+summary(loclin)
+plot(loclin$fitted, loclin$residuals, pch=".")
+```
+
+# Question 2
+```{r pressure}
+mlin <- lm(MedianIncome~MedianHouseValue+ HousingMedianAge + log(Households) + log(RoomsOverPopulation)+ 
+           log(BedroomsOverPopulation) + log(PopulationOverHouseholds), data=housedat)
+summary(mlin)
+
+dat= data.frame(mlin$fitted.values,mlin$residuals)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+  geom_point(shape=1)
+qqnorm(dat$Residuals);qqline(dat$Residuals, col=2)
+
+boxCox(mlin, family="bcPower")
+# tranform with power 0.5
+```
+# Question 3
+```{r}
+mlinsqr <- lm((MedianIncome)^0.5~MedianHouseValue+ HousingMedianAge + log(Households) + log(RoomsOverPopulation)+ 
+           log(BedroomsOverPopulation) + log(PopulationOverHouseholds), data=housedat)
+summary(mlinsqr)
+
+# find the press
+levs = hatvalues(mlinsqr)
+# Calculate PRESS
+PRESS = sum((mlinsqr$resid/(1-levs))^2)
+
+# calculate the Cook's distance
+cookd = as.numeric(cooks.distance(mlinsqr))
+numcoeff <- length(mlinsqr$coefficients)
+sort(pf(cookd, numcoeff, nrow(housedat) - numcoeff),decreasing=TRUE)[1:5]
+plot(cookd)
+```
+# Question 4
+```{r}
+gammodel = gam( (MedianIncome)^0.5 ~ s(MedianHouseValue)+ s(HousingMedianAge) + s(log(Households)) + 
+                    s(log(RoomsOverPopulation)) + s(log(BedroomsOverPopulation)) + s(log(PopulationOverHouseholds)),
+                  data=housedat)
+summary(gammodel)
+
+
+alpha = 0.05
+holdpreds = predict(gammodel, se = T)
+halfwidth <- qnorm(1-alpha/2)*sqrt(gammodel$sig2 +holdpreds$se.fit^2)
+
+
+predValue <- predict(gammodel, newdata= data.frame(MedianHouseValue = 58000, Households=90,
+                                                   HousingMedianAge=30, RoomsOverPopulation=1,
+                                                   BedroomsOverPopulation=0.25, PopulationOverHouseholds=4.75) , se = T)
+
+
+halfwidth <- qnorm(1-alpha/2)*sqrt(gammodel$sig2 + predValue$se.fit^2)
+lwr = predValue$fit - halfwidth
+upr = predValue$fit + halfwidth
+
+```
+
+
+# Question 5
+```{r}
+housedat$IncomeCat = "Medium"
+housedat$IncomeCat[housedat$MedianIncome > 5] = "High"
+housedat$IncomeCat[housedat$MedianIncome < 2] = "Low"
+
+# fit a tree
+fulltree = tree(factor(IncomeCat) ~ factor(Region) + HousingMedianAge, data = housedat, mindev=0, minsize=2)
+
+cvout = cv.tree.full(fulltree)
+plot(cvout)
+
+optaplha = cvout$k[which.min(cvout$dev)]
+
+cvout$size[which.min(cvout$dev)]
+opttree = prune.tree(fulltree, k=optaplha)
+plot(opttree)
+text(opttree, cex=0.75)
+
+table(housedat$IncomeCat,predict(opttree,type="class"))
+
+```
+
+
+
+

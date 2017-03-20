@@ -1,0 +1,111 @@
+---
+title: "F15"
+author: "Adil Hayat"
+date: "8 March 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+alpha = 0.05
+autodata = read.table("http://www.stat.cmu.edu/~cschafer/MSCF/autompg.txt", header=T)
+source("http://www.stat.cmu.edu/~cschafer/MSCF/cv.tree.full.txt")
+```
+
+
+# Question 1
+```{r}
+linmod <- lm(mpg~factor(cylinders) + factor(origin) + factor(modelyear) + displacement + horsepower +
+               weight + acceleration, data = autodata)
+
+summary(linmod)
+
+plot(linmod$fitted.values, linmod$residuals)
+
+boxCox(linmod, family="bcPower")
+
+linmodt <- lm(log(mpg)~factor(cylinders) + factor(origin) + factor(modelyear) + displacement + horsepower +
+               weight + acceleration, data = autodata)
+
+finalmod = step(linmodt, direction="both")
+```
+# Question 2
+```{r}
+model1 <- lm(log(mpg)~factor(cylinders) + factor(origin) + factor(modelyear) + displacement + horsepower +
+               weight + acceleration, data = autodata)
+
+model2 <- lm(log(mpg)~factor(cylinders) + factor(origin) + modelyear + displacement + horsepower +
+               weight + acceleration, data = autodata)
+
+
+model1 <- gam(log(mpg)~factor(cylinders) + factor(origin) + factor(modelyear) + s(displacement) + s(horsepower) +
+               s(weight) + s(acceleration), data = autodata)
+
+model2 <- gam(log(mpg)~factor(cylinders) + factor(origin) + s(modelyear) + s(displacement) + s(horsepower) +
+               s(weight) + s(acceleration), data = autodata)
+
+AIC(model1)
+AIC(model2)
+
+alpha = 0.05
+holdpreds = predict(gammodel, se = T)
+halfwidth <- qnorm(1-alpha/2)*sqrt(gammodel$sig2 +holdpreds$se.fit^2)
+
+
+predValue <- predict(model1, newdata= data.frame(cylinders = 8, displacement=315,
+                                                   horsepower=150, weight=3400,
+                                                   acceleration=11, modelyear=70, origin=1) , se = T)
+
+
+halfwidth <- qnorm(1-alpha/2)*sqrt(model1$sig2 + predValue$se.fit^2)
+lwr = predValue$fit - halfwidth
+upr = predValue$fit + halfwidth
+```
+
+
+# Question 3
+```{r}
+source("http://www.stat.cmu.edu/~cschafer/MSCF/CVforppr.R")
+
+PPRmod = ppr(log(mpg)~factor(cylinders) + factor(origin) + modelyear + displacement + horsepower +
+               weight + acceleration, data = autodata, nterms=3)
+
+summary(PPRmod)
+plot(PPRmod$fitted.values, PPRmod$residuals)
+dat= data.frame(PPRmod$fitted.values,PPRmod$residuals)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+  geom_point(shape=1)
+qqnorm(dat$Residuals);qqline(dat$Residuals, col=2)
+
+```
+# Question 4
+
+```{r}
+fulltree = tree(factor(origin) ~ factor(cylinders)+ modelyear + displacement + horsepower +
+               weight + acceleration + mpg, 
+                data = autodata, mindev=0, minsize=2)
+cvout = cv.tree.full(fulltree)
+plot(cvout)
+
+optaplha = cvout$k[which.min(cvout$dev)]
+
+cvout$size[which.min(cvout$dev)]
+opttree = prune.tree(fulltree, k=optaplha)
+plot(opttree)
+text(opttree, cex=0.75)
+
+sum(predict(opttree, type="class")== autodata$origin)/nrow(autodata)
+
+table(autodata$origin,predict(opttree,type="class"))
+
+
+```
+
+
+
+

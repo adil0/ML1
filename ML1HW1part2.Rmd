@@ -1,0 +1,16 @@
+---
+title: "ML1HW1part2"
+author: "Adil Hayat"
+date: "21 January 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+```
+
+

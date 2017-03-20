@@ -1,0 +1,179 @@
+---
+title: "ML1HW3"
+author: "Adil Hayat"
+date: "3 February 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+#                           HW3 Part 1
+### Models
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+library(stringr)
+suppressPackageStartupMessages(library(quantmod))
+# source the file to get Fama-French factor data
+source("http://www.stat.cmu.edu/~cschafer/MSCF/getFamaFrench.txt")
+
+PNC = getSymbols("PNC", from="2012-01-01", to="2012-06-30", auto.assign = F) 
+yielddata = read.table("http://www.stat.cmu.edu/~cschafer/MSCF/YieldCurves2012.txt", 
+                       header=T)
+yielddata$Date = as.Date(as.character(yielddata$Date), format="%m/%d/%y")
+keep = yielddata$Date <= "2012-6-30" & yielddata$Date >= "2012-1-1" &
+yielddata$Date != "2012-4-6"
+yielddatasub = yielddata[keep,]
+
+# Calculate the principal components
+yieldpcaout <- princomp(yielddatasub[,2:ncol(yielddatasub)])
+
+
+ffhold = getFamaFrench(from = "2012-1-1", to="2012-6-30")
+# Find the excess returns
+ffhold$PNCexret = 100*dailyReturn(PNC) - ffhold$RF
+ffhold$princomp1 <- yieldpcaout$scores[,1] 
+ffhold$princomp2 <- yieldpcaout$scores[,2] 
+ffhold$princomp3 <- yieldpcaout$scores[,3] 
+ffhold$princomp4 <- yieldpcaout$scores[,4] 
+ffhold$princomp5 <- yieldpcaout$scores[,5] 
+ffhold$princomp6 <- yieldpcaout$scores[,6] 
+  
+
+# Model 1, CAPM Model
+CAPMmodPNC = lm(PNCexret ~ Mkt.RF, data=ffhold)
+
+# Model 2, includes Fama French Factors
+ff3modPNC = lm(PNCexret ~ Mkt.RF + SMB + HML, data=ffhold)
+
+# Model 3, includes Fama French Factors and first 3 principal components 
+prin3modPNC = lm(PNCexret ~ Mkt.RF + SMB + HML + princomp1 + princomp2 + 
+                 princomp3, data=ffhold)
+
+# Model 4, includes Fama French Factors and first 6 principal components
+prin6modPNC = lm(PNCexret ~ Mkt.RF + SMB + HML + princomp1 + princomp2 + 
+                 princomp3 + princomp4 + princomp5 + princomp6, data=ffhold)
+
+```
+
+### Question 1
+```{r}
+print(summary(CAPMmodPNC))
+print(summary(ff3modPNC))
+print(summary(prin3modPNC))
+print(summary(prin6modPNC))
+```
+
+### Question 2
+```{r}
+mods <- list(CAPMmodPNC, ff3modPNC, prin3modPNC, prin6modPNC)
+aic_mods <- sapply(mods ,function(x){AIC(x)})
+best_mod <- mods[which(aic_mods==min(aic_mods))][[1]]
+print(best_mod)
+```
+### So, we see that the Model 3 is the best model
+
+
+### Question 3
+```{r}
+plot(best_mod)
+cookd = cooks.distance(best_mod)
+# plot the cook's distance graph
+plot(1:length(cookd),cookd,pch=16,xlab="Observation",ylab="Cook's Distance")
+```
+
+### Question 4
+```{r}
+keepnew = yielddata$Date <= "2012-7-31" & yielddata$Date >= "2012-7-01" 
+newyieldcurves = yielddata[keepnew,]
+newcoords = predict(yieldpcaout, newyieldcurves)
+
+PNCnew = getSymbols("PNC", from="2012-07-01", to="2012-07-31", auto.assign = F) 
+
+ffholdnew = getFamaFrench(from = "2012-7-01", to="2012-7-31")
+# Find the excess returns
+ffholdnew$PNCexret = 100*dailyReturn(PNCnew) - ffholdnew$RF
+ffholdnew$princomp1 <- newcoords[,1] 
+ffholdnew$princomp2 <- newcoords[,2] 
+ffholdnew$princomp3 <- newcoords[,3] 
+
+pred <- data.frame(predict.lm(best_mod,newdata = ffholdnew, interval = "prediction"))
+sum(ffholdnew$PNCexret >= pred$lwr &  ffholdnew$PNCexret <= pred$upr)/nrow(pred)
+```
+
+\newpage
+#                           Adil Hayat
+#                           HW3 Part 2
+### Question 1
+```{r}
+trainset <- readRDS("traindata.rds")
+trainset <- tbl_df(trainset)
+fullrow = rep(FALSE,nrow(trainset))
+fullrow <- apply(trainset, 1, function(x){!any(is.na(x[29:147]))})
+filt_trainset <- trainset[fullrow,]
+RetsOnly = trainset[fullrow, 29:147]
+pcaout = princomp(RetsOnly)
+summary(pcaout)
+```
+### PCA doesn't seem to be useful in this situation. 
+### This not surprising because we cannot expect to have a linear 
+### relationship between the various period of stock returns.
+### Otherwise, we would have been to predict the return of 
+### the next period using linear relationship. 
+
+### Question 2
+```{r}
+load("stepModelWinton.Rds")
+filt_trainset$princomp1 <- pcaout$scores[,1]
+string_model <- paste(paste(names(finalmod$coefficients)[-1],collapse = "+"),
+                      "princomp1",sep="+")
+new_model <- as.formula(paste("Ret_PlusOne",string_model, sep="~"))
+
+PCAmodel <- lm(new_model, data=filt_trainset)
+
+cat("AIC for step model with Best AIC=",AIC(finalmod),"\n")
+cat("AIC for model with first principal comp included =",AIC(PCAmodel),"\n")
+
+```
+### So, we observe that the AIC for the model with PCA increases. Hence, the new model is worse than the previous model obtained using step model.
+
+### Question 3
+```{r}
+old_model <- paste(names(finalmod$coefficients)[-1],collapse = "+")
+# first interaction model 
+intr_model1 <- as.formula(paste("Ret_PlusOne",paste(old_model,"Ret_4:Ret_5",
+                                                    sep="+")
+                                ,sep="~"))
+INTRmodel1 <- lm(intr_model1, data=filt_trainset)
+cat("AIC for model with interaction terms included =",AIC(INTRmodel1),"\n")
+
+# second interaction model 
+intr_model2 <- as.formula(paste("Ret_PlusOne",paste(old_model,"Ret_5:Ret_6",
+                                                    sep="+")
+                                ,sep="~"))
+INTRmodel2 <- lm(intr_model2, data=filt_trainset)
+cat("AIC for model with interaction terms included =",AIC(INTRmodel2),"\n")
+
+
+# third interaction model 
+intr_model3 <- as.formula(paste("Ret_PlusOne",paste(old_model,"Ret_4:Ret_104",
+                                                    sep="+")
+                                ,sep="~"))
+INTRmodel3 <- lm(intr_model3, data=filt_trainset)
+cat("AIC for model with interaction terms included =",AIC(INTRmodel3),"\n")
+
+# fourth interaction model 
+intr_model4 <- as.formula(paste("Ret_PlusOne",paste(old_model,"Ret_5:Ret_104",
+                                                    sep="+")
+                                ,sep="~"))
+INTRmodel4 <- lm(intr_model4, data=filt_trainset)
+cat("AIC for model with interaction terms included =",AIC(INTRmodel4),"\n")
+
+
+# fifth interaction model 
+intr_model5 <- as.formula(paste("Ret_PlusOne",paste(old_model,"Ret_91:Ret_95",
+                                                    sep="+")
+                                ,sep="~"))
+INTRmodel5 <- lm(intr_model5, data=filt_trainset)
+cat("AIC for model with interaction terms included =",AIC(INTRmodel5),"\n")
+```
+### We observe that adding interaction terms helps in reducing the AIC of 
+### the model in all the models with interaction terms that we tried. 

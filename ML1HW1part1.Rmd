@@ -1,0 +1,56 @@
+---
+title: "ML1HW1part1"
+author: "Adil Hayat"
+date: "21 January 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part 1
+
+```{r}
+library(dplyr)
+library(stringr)
+bonddata <-  read.table("http://www.stat.cmu.edu/~cschafer/MSCF/bonddata.txt",sep=",", header=T)
+bonddata <- tbl_df(bonddata)
+colnames(bonddata)
+
+# Assumned that the columns with less than 10 distinct values as categorical 
+cat_colnames<- colnames(bonddata)[sapply(bonddata, function(x) { length(unique(x))<10 } )]
+# Extract the predictors from time steps 5 and prior 
+prior_colnames<- sapply(names(bonddata), function(x) { str_match_all(x, "[0-9]+") %>% unlist %>% unique %>% as.numeric >=5 })
+prior_colnames <- names(prior_colnames[prior_colnames==TRUE]) %>% na.omit %>% unique
+
+# columns to remove, removing the columsn bond_id and id as well 
+col_remove <- c(cat_colnames,prior_colnames,"id","bond_id")
+
+bonddata_sel <- select(bonddata,-one_of(col_remove))
+```
+
+## Part 2
+
+```{r}
+library(ggplot2)
+# run the regression
+bondmodel <- lm(trade_price ~ ., data = bonddata_sel)
+cat("AIC of the model=", AIC(bondmodel),"\n")
+# removing the non-significant predictors for reducing AIC
+bondmodel2 <- lm(trade_price ~ curve_based_price + trade_price_last1 + 
+                   trade_price_last3 + curve_based_price_last3 + trade_price_last4, data = bonddata_sel)
+
+
+dat= data.frame(bondmodel$fitted.values,bondmodel$residuals)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+    geom_point(shape=1)
+qqnorm(dat$Residuals);qqline(dat$Residuals, col=2)
+```
+   
+### The model fits the data very well(looking at Adjusted-R-square(0.97))  
+###Observing the residual plot, the model seems to have fit the data well.  
+###Observing the QQPlot, We see that we have heavier tails, so the residuals are not normally distributed.   

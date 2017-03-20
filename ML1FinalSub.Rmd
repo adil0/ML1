@@ -1,0 +1,246 @@
+---
+title: "ML1FinalSub"
+author: "Adil Hayat"
+date: "24 February 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Fitting a linear regression model using lasso
+I tried using the step regression for variable selection as part of *Assignment 2* which gave an **AIC of -100908.4** and the plot of residuals vs the fitted values looked heteroscedastic. So, I decided on using the Yeo Johnson transformation for the response. Also, we want to transform the predictors because the histogram for predictors is heavily concentrated around zero. For that transformation we use the cube root function.
+```{r}
+suppressPackageStartupMessages(library(tidyverse))
+library(stringr)
+suppressPackageStartupMessages(library(car))
+suppressPackageStartupMessages(library(glmnet))
+suppressPackageStartupMessages(library(mgcv))
+suppressPackageStartupMessages(library(gbm))
+suppressPackageStartupMessages(library(randomForest))
+# plot of residuals vs fitted values for the step model
+load("stepModelWinton.Rds")
+plot(finalmod$fitted.values, finalmod$residuals, xlab="Fitted Values",ylab ="Residuals", 
+     main="Residuals vs Fitted Values using Step Regression")
+
+# load the training data
+trainset <- readRDS("traindata.rds")
+trainset <- tbl_df(trainset)
+fullrow = rep(FALSE,nrow(trainset))
+fullrow <- apply(trainset, 1, function(x){!any(is.na(x[29:147]))})
+filt_trainset <- trainset[fullrow,]
+RetsOnly = trainset[fullrow, 29:147]
+hist(RetsOnly$Ret_2, main="Histogram of Ret_2")
+
+# apply the transformation to the predictors by taking cube root so that data is evenly spaced
+mod_RetsOnly <- as.data.frame(apply(RetsOnly,MARGIN = 2, function(x){return(sign(x)*
+                                                                              abs(x)^(1/3))}))
+
+# histogram of the log log return
+hist(mod_RetsOnly$Ret_2, main="Histogram of Modified Ret_2")
+
+# combine the varibles from Rets_2 to Rets_120 and the Ret_PlusOne into 
+# a single data frame to build the model
+traindata <- cbind(filt_trainset$Ret_PlusOne, mod_RetsOnly)
+names(traindata)[1] <- "Ret_PlusOne"
+
+# Apply the Yeo-Johnson transformation on the data after log transformation
+boxCox(lm(Ret_PlusOne~.,data = traindata), family="yjPower")
+```
+
+Looking at the plot above I decided on using a value of $\lambda$ = 0.75. 
+We then apply the lasso regression on the modified data frame.
+```{r}
+modRet_PlusOne <- yjPower(filt_trainset$Ret_PlusOne, lambda = 0.75)
+
+# fit a lasso on the modified data 
+glmnetout <- glmnet(as.matrix(mod_RetsOnly), modRet_PlusOne)
+print(glmnetout)
+cvglmout = cv.glmnet(as.matrix(mod_RetsOnly), as.numeric(modRet_PlusOne), nfolds = 10)
+plot(cvglmout)
+```
+
+```{r}
+optlambdapos <- which(cvglmout$glmnet.fit$lambda == cvglmout$lambda.min)
+optlambdapos
+```
+
+We choose the value of $\lambda$ = 0.000082, which is one standard error away from the minimum MSE but with a fewer number of parameters.    
+```{r}
+glmnetout$beta[glmnetout$beta[,optlambdapos] != 0, optlambdapos]
+```
+These are the predictors used in the final model.
+
+```{r}
+# predict using lamda min 
+predlamMin_RetPlusOne <- predict(cvglmout, as.matrix(mod_RetsOnly), s= "lambda.min")
+
+# plot the Actual vs the Fitted Values for the min lambda
+plot(predlamMin_RetPlusOne, modRet_PlusOne, pch=16,cex=0.7,xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3, main= "Lasso Model with lambda 
+   = lambda(min)")
+abline(0,1,lwd=2,col=2)
+
+```
+Using the minimum value of $\lambda$ seems apropriate in this case.
+
+# Fitting a non-parameteric model
+```{r}
+# using the co-efficients obtained from the lasso for predictors selcection to
+# run gam on
+string_model <- paste(names(glmnetout$beta[glmnetout$beta[,optlambdapos] != 0, optlambdapos]),
+                      collapse = "+")
+new_model <- as.formula(paste("modRet_PlusOne",string_model, sep="~"))
+modelformula = new_model
+
+# prepare the data
+mod_traindata <- cbind(modRet_PlusOne, mod_RetsOnly)
+
+# using gam on the same dataset
+gam_mod <- gam(modelformula, data = mod_traindata)
+summary(gam_mod)
+plot(predict(gam_mod), mod_traindata$modRet_PlusOne,pch=16,cex=0.7,xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3, main= "GAM Model")
+abline(0,1,lwd=2,col=2)
+```
+# Since running the Bosting tree on the whole data was taking really long time, so I sampled ~10% of the data and ran all the 3 models on it. 
+# Sample the data points and try all the 3 approaches
+```{r}
+# sampling around ~10% of the training data to try different approaches
+# The data has been transformed already with the predictors changed to x^(1/3) 
+# and the response changed to y^0.75 using the Yeo Johnson transformation.  
+# set the seed
+set.seed(0)
+sampleTrainData <- mod_traindata[sample(nrow(mod_traindata), 2200), ]
+```
+
+## 1. Fitting a lasso model on the training data
+```{r}
+# fit a lasso on the modified data 
+glmnetoutSampl <- glmnet(as.matrix(sampleTrainData[,-1]), sampleTrainData$modRet_PlusOne)
+print(glmnetoutSampl)
+cvglmoutSampl = cv.glmnet(as.matrix(sampleTrainData[,-1]), sampleTrainData$modRet_PlusOne, nfolds = 10)
+plot(cvglmoutSampl, main="Cross Validation for Lasso Model")
+
+optlambdaposSampl <- which(cvglmoutSampl$glmnet.fit$lambda == cvglmoutSampl$lambda.min)
+cat("Optimal lambda=", optlambdaposSampl, "\n")
+glmnetoutSampl$beta[glmnetoutSampl$beta[,optlambdaposSampl] != 0, optlambdaposSampl]
+predlamMinSampl_RetPlusOne <- predict(cvglmoutSampl, as.matrix(sampleTrainData[,-1]), 
+                                      s= "lambda.min")
+
+## Diagnostic Plots
+# plot the Actual vs the Fitted Values for the min lambda
+plot(predlamMinSampl_RetPlusOne, sampleTrainData$modRet_PlusOne, pch=16,cex=0.7,
+     xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3, main= "Lasso Model with lambda = 
+   lambda(min)")
+abline(0,1,lwd=2,col=2)
+
+# plotting the fitted vs the residual plot
+residualsLasso <- sampleTrainData$modRet_PlusOne - predlamMinSampl_RetPlusOne
+
+dat <- data.frame(predlamMinSampl_RetPlusOne, residualsLasso)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+    geom_point(shape=1) + ggtitle("Residuals vs Fitted Values") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Calculate the RSS
+RSSLasso = sum(residualsLasso^2)
+```
+Observing the diagnostic plots, it is difficult to comment on the fit because of the distribution of the data. Commenting on heteroscedasticity of the fit is difficult due to sparcity of data. Similarly, observing the Actual vs Predicted plot, we can say that the model does not fit at extreme values well. We can also observe some outliers too.
+
+## 2. Fitting a gam model on the training data
+```{r}
+# using the co-efficients obtained from the lasso for predictors selcection to run gam on
+str_model <- paste(names(glmnetoutSampl$beta[glmnetoutSampl$beta[,optlambdaposSampl] != 0,
+                                             optlambdaposSampl]),collapse = "+")
+gam_model <- as.formula(paste("modRet_PlusOne",string_model, sep="~"))
+gamformula = gam_model
+
+# using gam on the same dataset
+gam_mod <- gam(gamformula, data = sampleTrainData)
+summary(gam_mod)
+
+predGam_RetPlusOne <- predict(gam_mod)
+
+## Diagnostic Plots
+# Predicted vs Actual PLots
+plot(predGam_RetPlusOne, sampleTrainData$modRet_PlusOne, pch=16,cex=0.7,xlab="Predicted Value",
+   ylab="Actual Response", cex.axis=1.3,cex.lab=1.3, main= "GAM Model")
+abline(0,1,lwd=2,col=2)
+
+# plotting the fitted vs the residual plot
+dat <- data.frame(gam_mod$fitted.values, gam_mod$residuals)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+    geom_point(shape=1) + ggtitle("Residuals vs Fitted Values") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Calculate the RSS
+RSSGam = sum(gam_mod$residuals^2)
+```
+In this case too, it is difficult to comment on the fit because of the distribution of the data. Commenting on heteroscedasticity of the fit is difficult due to sparcity of data. Similarly, observing the Actual vs Predicted plot, we can say that the model does not fit at extreme values well. We can also observe some outliers too.
+
+## 3. Using Boosting trees on the training data
+```{r, eval=FALSE}
+# gbmModel = gbm(modRet_PlusOne ~ ., data = sampleTrainData, bag.fraction=0.65,
+#                distribution="gaussian", n.trees=20000, interaction.depth=3, 
+#                shrinkage = 0.0001, cv.folds=3)
+
+# save(gbmModel,file = "GBMModel20k.Rds")
+# load the saved model
+load("GBMModel20k.Rds")
+# Find the best model via cross-validation.
+gbm.perf(gbmModel, method="cv")
+# optimal number of trees
+optnumtrees = 19998
+
+# Get the fitted values for this model
+gbmModelFits = predict(gbmModel,n.trees=optnumtrees)
+
+# calucate the residuals
+residualsGbm <- sampleTrainData$modRet_PlusOne - gbmModelFits
+
+# Find RSS for this model
+RSSGbm <- sum((residualsGbm)^2)
+
+# Diagnostic Plots
+# plotting the fitted vs the residual plot
+dat <- data.frame(gbmModelFits, residualsGbm)
+names(dat) <- c("Fitted_Values","Residuals")
+ggplot(dat, aes(x=Fitted_Values, y=Residuals)) +
+    geom_point(shape=1) + ggtitle("Residuals vs Fitted Values") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+
+plot(gbmModelFits, sampleTrainData$modRet_PlusOne, pch=16, cex=0.7,
+     xlab="Predicted Value", ylab="Actual Response", cex.axis=1.3,
+     cex.lab=1.3)
+abline(0,1,lwd=2,col=4)
+```
+I decided on using *Boosting Trees* comparing the RSS of the models I made. 
+**We are avoiding overfitting by using cross-validation on the training data.**
+Further, boosting trees gave the highest score on the kaggle as well among all the models that I made.
+
+# Predictions for the test dataset 
+```{r}
+source("ConvertSubmission.txt")
+# testset <- readRDS("testData.rds")
+
+# transform the predictors
+# mod_testData <- as.data.frame(apply(testset,MARGIN = 2, function(x){return(sign(x)*
+#                                      abs(x)^(1/3))}))
+
+## using the best model
+# pred_values <- predict(gbmModel,newdata = mod_testData, n.trees=optnumtrees)
+
+# tranform the response back to y^4/3 so that we get the response
+# myPreds <- sign(pred_values)*abs(pred_values)^(4/3)
+
+# convert the file for submission on Kaggle
+# ConvertSubmission(myPreds, outfname="treeOutOpt.csv")
+
+# write the predcited values to a .txt file for final submisssion
+# write.table(myPreds,file="GBMOutOpt.txt", row.names = FALSE, col.names = FALSE)
+```
+
